@@ -1,0 +1,175 @@
+package chicagocentralmsbl.services;
+
+import org.jmock.Expectations;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import net.sf.ehcache.Ehcache;
+import net.sf.ehcache.Element;
+import smallsyssolutions.com.xml.baseball.standings.StandingsHierarchies;
+
+public class CacheFrontingXmlFileRetrieverServiceImplTest extends BaseTest {
+
+	private CacheFrontingXmlFileRetrieverServiceImpl _fixture = null;
+
+	Ehcache _mockCache = null;
+	
+	FileReader _mockFileReader = null; 
+	
+	Element _ele = null; 
+	
+	Object _strObj = "return value";
+	String _standingsConf = "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><Hierarchies createAMPM=\"AM\" createDD=\"17\" createHH=\"09\" createMM=\"12\" createYYYY=\"2014\" createmm=\"06\" seasonCompleted=\"false\" seasonDesc=\"2014\" xmlVersion=\"2.0\"></Hierarchies>";
+
+	@Before
+	public void setUp() {
+
+		super.setUp();
+
+		_fixture = new CacheFrontingXmlFileRetrieverServiceImpl();
+
+		_mockCache = context.mock(Ehcache.class);
+		setField(_fixture, "_cacheFiles", _mockCache);
+
+		_mockFileReader = context.mock(FileReader.class);
+		setField(_fixture, "_fileReader", _mockFileReader);
+		
+		_ele = new Element("key", _strObj);
+		
+		System.out.println(_mockCache);
+		
+	}
+
+	@Test
+	public void testForRetreiveFromCache() throws Exception { 
+
+		context.checking(new Expectations() {{
+			
+			atLeast(1).of(_mockCache).isKeyInCache(with("key"));
+			will(returnValue(true)); 
+			
+			atLeast(1).of(_mockCache).get("key");
+			will(returnValue(_ele));
+
+			
+		}});
+
+		Object o = _fixture.get("key", Object.class);
+		
+		assertEquals(_strObj, o);
+		
+
+	}
+	
+	@Test
+	/**
+	 * Key doesn't exist in the cache, so delegate, serliaze, return 
+	 * @throws Exception
+	 */
+	public void testRetrieveFromFileAndMarshall() throws Exception { 
+		
+		context.checking(new Expectations() {{
+			
+			
+			exactly(1).of(_mockCache).isKeyInCache(with("key"));
+			will(returnValue(false)); 
+
+			exactly(1).of(_mockFileReader).exists("key");
+			will(returnValue(true));
+
+			atLeast(1).of(_mockFileReader).readFileString("key");
+			will(returnValue(_standingsConf));
+
+			exactly(1).of(_mockCache).put((with(any(Element.class))));
+			
+			
+		}});
+
+		Object o = _fixture.get("key", StandingsHierarchies.class);
+		
+		assertNotNull(o);
+		
+		assertTrue(o instanceof StandingsHierarchies);
+		
+		
+		
+	}
+	
+	
+	@Test
+	public void testForNullFileNoFile() throws Exception { 
+
+		context.checking(new Expectations() {{
+			
+			atLeast(1).of(_mockCache).isKeyInCache(with("key"));
+			will(returnValue(false)); 
+			
+			atLeast(1).of(_mockFileReader).exists("key");
+			will(returnValue(false));
+			
+		}});
+
+		
+		Object o = _fixture.get("key", StandingsHierarchies.class);
+		assertNull(o);
+		
+		try { 
+			o = _fixture.get(null, StandingsHierarchies.class);
+			fail("Should throw IAE");
+		} catch (IllegalArgumentException iae) { 
+			assertTrue(true);
+		} catch (Exception e) { 
+			fail("Should throw IAE");
+		}
+
+	}
+
+	
+	@Test
+	/**
+	 * This test is specific (and rarely, if ever used 
+	 * where I"m putting a "file" content data into the cache and not marshalling it 
+	 * according to the Castor semantics. 
+	 * TODO - I don't believe this in use currently, but a nice to have....
+	 * TODO(2) - shadow method of _fixture.get(key).... 
+	 * @throws Exception
+	 */
+	public void testRetrieveFromFileAndNoMarshalling() throws Exception { 
+		
+		context.checking(new Expectations() {{
+			
+			atLeast(1).of(_mockCache).isKeyInCache(with("key"));
+			will(returnValue(false)); 
+
+			atLeast(1).of(_mockFileReader).exists("key");
+			will(returnValue(true));
+
+			atLeast(1).of(_mockFileReader).readFileString("key");
+			will(returnValue(_standingsConf));
+
+			exactly(1).of(_mockCache).put((with(any(Element.class))));
+			
+			
+		}});
+
+		Object o = _fixture.get("key", null);
+		
+		assertNotNull(o);
+		
+		assertEquals(_standingsConf, o);
+		
+		assertTrue(o instanceof String);
+		
+		
+		
+	}
+	
+	@After
+	public void ensureContextAssertions() {
+		context.assertIsSatisfied();
+	}
+
+
+
+}
