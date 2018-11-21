@@ -12,8 +12,7 @@ In general, attached are:
 
 *** A mocked unit test against one of the services.
 
-*** The ant build
-
+*** The ant build (This build relies on the underlying Eclipse-generated .classes) does not include integration into the unit test suite, code coverage, etc.  This is by design for a minimal build/deploy; Unit tests/code coverage for this project is performed by hand utilizing embedded Junit runner with eclEmma for code coverage.
 
 
 The general architecture:
