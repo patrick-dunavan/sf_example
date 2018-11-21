@@ -343,7 +343,6 @@ public class NavigationController extends AbstractNavigationController implement
 
 	}
 
-	/** The higher one goes first! Not sure if it delegates */
 	@RequestMapping(value = { "/about.htn", "aboutInner.htn" })
 	public String about(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response) throws Exception {
 
