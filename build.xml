@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="web_chicagocentralmsbl" default="startServer" basedir="." xmlns:ivy="antlib:org.apache.ivy.ant">
+
+	<!-- import properties (app settings, classpath, jar file locations) -->
+	<property file="../../zz_project_properties_git/zz_project_properties_git/project.tomcat7.properties"/>
+
+	<property name="build.war.file" value="chicagocentralmsbl"/>
+
+	
+      <target name="displayEnvironment">
+
+        <tstamp>
+            <format property="TODAY_SSS" pattern="yyyy-MM-dd" locale="en"/>
+            <format property="TIME_SSS" pattern="hh:mm a"/>
+            <format property="TIME_SSS2" pattern="hh_mm_a"/>
+
+        </tstamp>
+
+          <echo message="Ant Version Running: ${ant.version}" level="info" />
+          <echo message="Existing environment: ${os.name}/${os.arch}/${os.version}  ${lf}" level="info"/>
+          <echo message="JAVA Version: ${java.version}-->${java.vendor}  ${lf}" level="info"/>
+          <echo message="${java.vendor.url}-->${java.vendor}  ${lf}" level="info"/>
+          <echo message="File Separator='${file.separator}' .. Path Separator='${path.separator}'  ${lf}" level="info"/>
+          <echo message="Running with base dir of ${basedir} ${lf}"/>
+          <echo message="...${lf}...${lf}...${lf}"/>
+
+    		<delete dir="zzz_temp_${build.dir}" />
+    		<mkdir dir="zzz_temp_${build.dir}" />
+
+      </target>
+
+			<property name="srcCopy" value="src/" />
+			<property name="srcConfig" value="srcConfig/" />
+			<property name="bin" value="WebRoot/WEB-INF/classes" />
+			<property name="lib" value="WebRoot/WEB-INF/lib" />
+			<property name="src" value="WebRoot" />
+
+
+    <target name="init">
+
+        <echo
+            message="Copying file to output directory..."
+            level="info" />
+
+
+        <delete dir="${build.dir}" />
+        <mkdir dir="${build.dir}" />
+
+
+		<copy file="${srcConfig}/resources.properties" tofile="${bin}/resources_en.properties" overwrite="true" verbose="true" /> 
+
+    </target>
+	
+	<property name="less.lib.dir" value="../../zz_project_properties_git/zz_project_properties_git/lessCssAntDeps" />
+	<property name="css.dir" value="css"/>
+	<property name="less.dir" value="css"/>
+	<property name="tool.rhino.jar" value="${less.lib.dir}/rhino1.7.R4.js.jar"/>
+	<property name="tool.rhino.lessc" value="${less.lib.dir}/lessc-rhino-1.7.0.js"/>
+	<property name="tool.rhino.less" value="${less.lib.dir}/less-rhino-1.7.0.js"/>
+
+		<target name="compile-less" description="compile css using LESS" depends="init">
+		    <apply dir="${css.dir}" executable="java" parallel="false" failonerror="true">
+          <fileset dir="${less.dir}">
+              <include name="*.less"/>
+          </fileset>		        
+		    	<arg value="-jar"/>
+	        <arg path="${tool.rhino.jar}"/>
+	        <arg value="-f"/>
+	        <arg path="${tool.rhino.less}"/>
+	        <arg path="${tool.rhino.lessc}"/>
+	        <srcfile/>
+	        <mapper type="glob" from="*.less" to="css/*.css"/>
+	        <targetfile/>
+		    </apply>
+		    
+		  <copy
+		      file="${css.dir}/cssLess.css"
+		      todir="X:\\chicagocentralmsbl\\css\\"
+		      verbose="true"
+		      overwrite="true" />
+
+			
+		    <echo message="Finished compile-less" /> 
+		    
+		</target>
+		
+	
+	<target name="compressCssJS" depends="compile-less">
+
+		<echo message = "Compressing with yui classpath: ${yui.compressor.libarary}" />
+
+
+    	<path id="yuicompressor.classpath">
+        	<fileset dir="${yui.compressor.libarary}">
+            	<include name="yuicompressor.jar"/>
+            	<include name="YUIAnt.jar"/>
+            	<include name="jargs.jar"/>
+        	</fileset>
+    	</path>
+
+    	<taskdef name="yuicompress" classname="com.yahoo.platform.yui.compressor.YUICompressTask">
+        	<classpath>
+            	<path refid="yuicompressor.classpath"/>
+        	</classpath>
+    	</taskdef>
+
+		<echo message="Welcome to the compress target" />
+
+		<delete dir="css_minification" verbose="false" />
+
+		<yuicompress
+			linebreak="8000"
+			warn="true"
+			munge="yes"
+			preserveallsemicolons="true"
+			outputfolder="css_minification" >
+
+					<!--Skip foundation; it's got issues; copy it baseline later --> 
+         	<fileset dir="css" excludes="**/other_special_file.js" >
+             	<include name="**/*.js" />
+             	<include name="**/*.css" />
+         			<exclude name="**/Copy*.*" />
+         			<exclude name="**/foundation/**" />
+         			<exclude name="**/*min*.js"/>
+         			<exclude name="**/bootstrap/**" />
+         			<exclude name="blueprint/*.*" />
+         			<exclude name="**/bjqs-1_3.js"/>
+         			<exclude name="**/chicagocentralmsbl_main.js"/>
+         			<exclude name="**/chicagocentralmsbl_main.js.uncompressed.js"/>
+         			<exclude name="**/chicagocentralmsbl_main1.1.js"/>
+         			<exclude name="**/cloudcarousel/**" />
+         		<exclude name="**/double-elim.js"/>
+        	</fileset>
+    	</yuicompress>
+
+			
+		<!-- copy foundation files over without the yuicompression; already compressed and min --> 
+	  <copy todir="css_minification/foundation/" verbose="true">
+	    <fileset dir="css/foundation/">
+	    	<include name="**/*.*"/>
+	    </fileset>
+	  </copy>		
+		
+	</target>
+	
+	<target name="startServer" depends="displayEnvironment,init,compressCssJS,doWar">
+
+			<echo message="doing deploy" />
+
+			<sshexec
+					host="192.168.0.160"
+					username="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+					password="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+					trust="yes"
+					command="JAVA_HOME=/jdk1.8.0_131; export JAVA_HOME; bash -c set ; cstart9_remote;"/>
+	</target>
+
+	
+	<target name="doWar" depends="displayEnvironment,init,compressCssJS">
+
+
+		<ivy:retrieve pattern="zzz_temp_${build.dir}/lib/[conf]/[artifact]-[revision].[ext]" conf="binaries" overwritemode="always" log="default"/>
+
+		
+		<echo message="...${lf}...${lf}...${lf}"/>
+
+        <echo
+            message="Creating war file: ${build.war.file}.war..."
+            level="info" />
+
+
+		    <copy
+		        file="${project.jar.ref.copy.lib}\smallsyssolutions_baseball.jar"
+		        todir="${web.lib}"
+		        verbose="true"
+		        overwrite="true"
+		    />
+		
+			    <copy
+			        file="${project.jar.ref.copy.lib}\smallsyssolutions_baseball18.jar"
+			        todir="${web.lib}"
+			        verbose="true"
+			        overwrite="true"
+			    />
+
+		    	
+		<war destfile="${build.dir}${build.war.file}.war" webxml="${web.webxml}">
+			<fileset dir="${src}" />
+			<lib dir="zzz_temp_${build.dir}/lib/binaries"/>
+		
+		</war>
+
+
+        <checksum
+            file="build/${build.war.file}.war"
+            property="jarMD5" />
+
+        <echo
+            message="Checksum(1) of ${jarMD5}."
+            level="info" />
+
+
+
+        <copy
+            file="build/${build.war.file}.war"
+            todir="${project.tomcat.warLib}"
+            verbose="true"
+            overwrite="true"
+        />
+
+        <checksum file="${project.tomcat.warLib}/${build.war.file}.war" property="${jarMD5Copy}" verifyProperty="isEqual"/>
+
+        <copy
+            file="build/${build.war.file}.war"
+            todir="${project.war.ref.copy.lib}"
+            verbose="true"
+            overwrite="true"
+        />
+
+
+		<checksum file="${project.war.ref.copy.lib}/${build.war.file}.war" property="${jarMD5}" verifyProperty="isEqual"/>
+
+	</target>
+
+	
+
+	<target name="report" depends="doWar">
+		
+	    <delete dir="build/ivyReport"/>
+	    <mkdir dir="build/ivyReportreport" />
+	    <ivy:resolve type="${ivy.resolve.types}"/>
+	    <ivy:report todir="build/ivyReport" />
+	    
+		
+	</target>
+	
+</project>
+
