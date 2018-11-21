@@ -1,0 +1,736 @@
+package chicagocentralmsbl.controllers;
+
+import static chicagocentralmsbl.BatchInformationHandler.CONST_BOARD_OF_DIRECTORS;
+import static java.util.Optional.ofNullable;
+import static smallsyssolutions.com.baseball.client.batch.SportsCacheNamingEnum.LEAGUE_NAMES_MAP;
+import static smallsyssolutions.com.baseball.client.batch.SportsCacheNamingEnum.LOCATION_MAP;
+import static smallsyssolutions.com.reminders.enums.ReminderGroupEnum.REMINDER_PAST_LEADERS;
+import static smallsyssolutions.com.util.CollectionUtils.safeList;
+import static smallsyssolutions.com.util.StaticUtils.isNotEmpty;
+import static smallsyssolutions.com.util.StaticUtils.isNull;
+import static smallsyssolutions.com.util.StaticUtils.notNull;
+import static smallsyssolutions.com.util.StaticUtils.sb;
+import static smallsyssolutions.com.util.StaticUtils.sbStr;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+
+import javax.annotation.PostConstruct;
+import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.apache.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.validation.BindingResult;
+import org.springframework.validation.ObjectError;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.SessionAttributes;
+import org.springframework.web.servlet.ModelAndView;
+
+import com.google.common.collect.FluentIterable;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
+import chicagocentralmsbl.controllers.form.PlayerAppForm;
+import chicagocentralmsbl.interceptors.GlobalConstants;
+import chicagocentralmsbl.services.ContextDataService;
+import chicagocentralmsbl.services.CreateContactService;
+import chicagocentralmsbl.services.XmlFileRetrieverService;
+import net.sf.ehcache.Ehcache;
+import net.sf.ehcache.Element;
+import smallsyssolutions.com.baseball.data.LocationData;
+import smallsyssolutions.com.baseball.data.ScheduleData;
+import smallsyssolutions.com.baseball.handler.predicates.ScheduleDataFilterablePredicate;
+import smallsyssolutions.com.baseball.handler.structures.GameByMonthStructure;
+import smallsyssolutions.com.baseball.session.audience.AudienceSession;
+import smallsyssolutions.com.dirfilehandling.data.DirectoryListingData;
+import smallsyssolutions.com.global.enums.MimeTypes;
+import smallsyssolutions.com.messagestucture.ErrorStructure;
+import smallsyssolutions.com.messagestucture.MessageStructure;
+import smallsyssolutions.com.messagestucture.RemoveBeginningUnderlineFieldNamingStrategy;
+import smallsyssolutions.com.messagestucture.ReturnStructure;
+import smallsyssolutions.com.util.StaticUtils;
+import smallsyssolutions.com.util.UtilGeneric;
+import smallsyssolutions.com.xml.baseball.divisionDetails.DivisionDetailsHierarchies;
+import smallsyssolutions.com.xml.baseball.divisionTeamSummaryStats.DivisionTeamSummaryStatsHierarchies;
+import smallsyssolutions.com.xml.baseball.leagueLeaders.LeagueLeadersHierarchies;
+import smallsyssolutions.com.xml.baseball.leagueTeamSummaryStats.TeamSummaryStatsHierarchies;
+import smallsyssolutions.com.xml.baseball.locations2.AllLocationsHierarchies;
+import smallsyssolutions.com.xml.baseball.standings.ConferenceStandingsHierarchies;
+import smallsyssolutions.com.xml.baseball.standings.Division;
+import smallsyssolutions.com.xml.baseball.standings.StandingsHierarchies;
+import smallsyssolutions.spring.web.AbstractNavigationController;
+
+@Controller
+@SessionAttributes(GlobalConstants.AUDIENCE_SESSION)
+
+/**
+ * The main Nav Controller for chicagocentralmsbl.
+ * 
+ * As a note for reviewers, I frequently use DSL-like syntax for static utility methods (sometimes, these are static methods from say - 
+ * apache commons that I wrap and rename in static methods (for instance, isNotEmpty is direct to apache commons;)
+ * Exmple -> sbStr(Object ...) creates a String instance backed by a utility method that takes an array of objects and builds the stringbuilder
+ * instance around them and returns the toString().
+ *   
+ * Eventually, some of these will be converted into Function - but the code as written was originally java 1.4 so a lot of refactoring required. 
+ * 
+ * I tend not to use fluent/chaining syntax around them - but will often wrap these when I believe it's safe to do so.  I rarely
+ * wrap these (example:  safeList(as(object) - which roughly equates to "typecast this object (assumed to be a list), and if it's null wrap 
+ * an EmptyList to it  --- unless it's a concept the team has agreed upon and meets standards and guidelines set.  
+ * 
+ * Other methods noted here (fRet / cRet) are specific methods that handle some of the details that would tend to muck up the code - 
+ * i.e. 
+ * 
+ * fRet(key/class) is a method that delegates the heavy lifting to the XmlFilRetriever implemenation. 
+ * cRet(key) wraps an Optional around the "Context Data" (data retrieved NOT from the underlying file implementation)
+ * as(x) is a wrapper that avoids typecasting warnings / having to typecase around objects 
+ * 
+ * 
+ *  
+ * @author pdd
+ *
+ */
+
+public class NavigationController extends AbstractNavigationController implements GlobalConstants {
+
+	private static Logger _logEmail = Logger.getLogger("emailLog");
+	private static Logger _logErrors = Logger.getLogger("errors");
+	private final static Logger _log = Logger.getLogger(NavigationController.class);
+
+	/* Data that has been written to xml/file structure */ 
+	@Autowired
+	@Qualifier("xmlFileRetrieverService")
+	private XmlFileRetrieverService _xmlFileRetrieverService;
+
+	/* "Current data that is safely dropped into the context / main cache of the application */ 
+	@Autowired
+	@Qualifier("contextDataService")
+	private ContextDataService _contextDataService;
+
+	/* For player interest / contact */ 
+	@Autowired
+	@Qualifier("contactService")
+	private CreateContactService _createContactService; 
+	
+	
+	@Resource(name = CONST_HTN_MAPPING_PROPS)
+	Properties _mappingProperties;
+
+	private Map<String, String> _map; // Configured in @PostConstruct
+
+	/**
+	 * Convenience method for file retrieval.
+	 * This activity is "fronted" (due to the simplicity, I'm not using a proxy or decorator around it)
+	 * by checking the key in the filesCache before retrieving from the file.  (See the xmlFileRetreiver impl)
+	 */
+	private <T extends Object> Optional<T> fRet(String key, Class<T> clz) throws Exception {
+		Optional<T> opt = ofNullable(_xmlFileRetrieverService.get(key, clz));
+		return opt;
+	}
+
+	/**
+	 * Convenience method for cache (objects) retrieval
+	 */
+	private Optional<Element> cRet(String key) {
+		Optional<Element> opt = ofNullable(_contextDataService.get(key));
+		return opt;
+		
+	}
+
+	
+	@RequestMapping(value = { "/pitchLeaders.htn", "pitchLeadersInner.htn" })
+	public String pitchLeaders(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response)
+			throws Exception {
+
+		String div = request.getParameter(CONST_PARAM_dv);
+
+		String str = (notNull(div) 
+			? sbStr(aud.getXmlPath(), CONST_TXT_LEADERS, div, CONST_FILE_DV_XML)
+			: sbStr(aud.getXmlPath(), CONST_TXT_LEADERS, aud.getLeague(), XML));
+
+		if (_log.isDebugEnabled()) {
+			_log.debug("Looking up: " + str);
+		}
+		
+		Optional<LeagueLeadersHierarchies> leadersHierarchies = fRet(str, LeagueLeadersHierarchies.class);
+
+		leadersHierarchies.ifPresent(me -> {
+			request.setAttribute(CONST_ATTR_PITCHING_LEADERS, me.getPitching_Leaders());
+		});
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/hitLeaders.htn", "hitLeadersInner.htn" })
+	public String hitLeaders(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response)
+			throws Exception {
+
+		String dv = request.getParameter(CONST_PARAM_dv);
+
+		/** 201505 - chicen has no divs within a league left; reversed the eval (notNull to isNull) **/
+		String str = (isNull(dv) 
+			? sbStr(aud.getXmlPath(), CONST_TXT_LEADERS, aud.getLeague(), XML)
+			: sbStr(aud.getXmlPath(), CONST_TXT_LEADERS, dv, CONST_FILE_DV_XML));
+
+		if (_log.isDebugEnabled()) {
+			_log.debug("Looking up: " + str);
+		}
+
+		Optional<LeagueLeadersHierarchies> leadersHierarchies = fRet(str, LeagueLeadersHierarchies.class);
+
+		leadersHierarchies.ifPresent(me -> {
+			request.setAttribute(CONST_ATTR_HITTING_LEADERS, me.getHitting_Leaders());
+		});
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/leaders.htn", "/leadersInner.htn" })
+	public String leaders(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response)
+			throws Exception {
+
+		/** how many divs, etc. to explode **/
+		Optional<Element> leagueMapByDivElement = cRet(CONST_LEAGUE_MAP_BY_DIV_IDS_MAP);
+
+		leagueMapByDivElement.ifPresent(me -> {
+
+			Map<Integer, Map<String, Integer>> leagueMapByDivIdsMap = as(leagueMapByDivElement.get().getObjectValue());
+			request.setAttribute(CONST_LEAGUE_MAP_BY_DIV_IDS_MAP, leagueMapByDivIdsMap);
+
+		});
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/divisionDetails.htn" })
+	public String divisionDetails(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response)
+			throws Exception {
+
+		/** Division Details Hierarchies **/
+		String str = sbStr(aud.getXmlPath(), CONST_FILE_DIVISION_DETAILS, aud.getLeague(), XML);
+
+		Optional<DivisionDetailsHierarchies> theDivisionDetailsHierarchies = fRet(str, DivisionDetailsHierarchies.class);
+
+		theDivisionDetailsHierarchies.ifPresent(me -> {
+			request.setAttribute(CONST_ATTR_DIVISION_LIST, me.getDivision_entry());
+		});
+
+		/* Team Summary Stats */ 
+		str = sbStr(aud.getXmlPath(), CONST_FILE_LEAGUE_TEAM_SUMMARY_STATS, XML);
+
+		Optional<TeamSummaryStatsHierarchies> theLeagueTeamHierarchies = fRet(str, TeamSummaryStatsHierarchies.class);
+
+		theLeagueTeamHierarchies.ifPresent(me -> {
+			request.setAttribute(CONST_ATTR_LEAGUE_SUMMARY_DATA, me.getLeagueByLeagueId(aud.getLeague()));
+		});
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = "/locationDirections.htn")
+	public String locationDirections(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, @RequestParam("id") Integer id,
+			@RequestParam(value = "nm", required = false) String nm, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+		Optional<Element> locationMapElement = cRet(LOCATION_MAP.getName());
+
+		locationMapElement.ifPresent(me -> {
+
+			Map<Integer, LocationData> locationMap = as(me.getObjectValue());
+			LocationData locationData = locationMap.get(id);
+			request.setAttribute(CONST_ATTR_LOCATION_DATA, locationData);
+
+			// TODO: Historical Data!
+
+		});
+
+		String str = sbStr(aud.getXmlPath(), CONST_FILE_LOCATIONS_XML);
+
+		Optional<AllLocationsHierarchies> lh = fRet(str, AllLocationsHierarchies.class);
+
+		lh.ifPresent(me -> request.setAttribute(CONST_ATTR_LOCATION_STATS, Arrays.asList(me.getLocation_entry())));
+
+		return lookupAndReturn(request, response);
+
+	} // method
+
+	@RequestMapping(value = "/monthScheduleSelect.htn")
+	public String doScheduleMonths(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response) {
+
+		Optional<Element> ele = cRet(CONST_CACHE_KEYLEAGUE_SCHEDULE_BY_MONTH_FMT_MAP);
+
+		ele.ifPresent(me -> {
+
+			Map<Integer, List<GameByMonthStructure>> leagueScheduleByMonthFmtMap = as(me.getObjectValue());
+
+			Collection<GameByMonthStructure> scheduleMonthsList = leagueScheduleByMonthFmtMap.get(aud.getLeague());
+
+			request.setAttribute(CONST_ATTR_SCHEDULE_MONTHS, scheduleMonthsList);
+
+			Map<String, List<ScheduleData>> schedByYYYYMMDataListMap = new HashMap<>();
+
+			safeList(scheduleMonthsList).forEach(item -> {
+				String s = sbStr(aud.getLeague(), CONST_TILDE, item.getKey());
+				schedByYYYYMMDataListMap.put(item.getKey(), getScheduleDataByMonth(request, response, aud, s));
+			});
+
+			request.setAttribute(CONST_ATTR_SCHEDULE_DETAIL_MAP, schedByYYYYMMDataListMap);
+
+		});
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/dlList.htn", "/dlListInner.htn" })
+	public String dlList(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response) {
+
+		Optional<Element> ele = cRet(CONST_ATTR_DL_LIST_CURRENT_SEASON);
+
+		ele.ifPresent(me -> {
+
+			Map<Integer, List<smallsyssolutions.com.baseball.handler18.PlayerTeamClass>> playersInLegueOnDl = as(ele);
+			List<smallsyssolutions.com.baseball.handler18.PlayerTeamClass> lgDls = playersInLegueOnDl.get(aud.getLeague());
+			request.setAttribute(CONST_ATTR_DL_PLAYERS_LIST, lgDls);
+
+		});
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/standings.htn", "standingsInner.htn" })
+	public String standings(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response)
+			throws Exception {
+		
+		String s = aud.getXmlPath() + CONST_STANDINGS_ + aud.getLeague() + XML;
+
+		fRet(s, StandingsHierarchies.class).ifPresent(me -> request.setAttribute(CONST_ATTR_STANDINGS_BY_DIVISION_ARRAY, me.getDivision()));
+
+		/*** Div/conf support **/
+		Optional<String> conf = ofNullable(request.getParameter(CONST_PARAM_conf));
+
+		request.setAttribute(CONST_ATTR_THE_DIV_CONF_TITLE, (conf.isPresent() ? CONST_CONFERENCE : CONST_DIVISION));
+		
+		if (conf.isPresent()) { 
+			
+			String fileNm = sbStr(aud.getXmlPath(), CONST_FILE_STANDINGS_CONF, aud.getLeague(), XML);
+			
+			fRet(fileNm, ConferenceStandingsHierarchies.class)
+				.ifPresent(me -> request.setAttribute(CONST_ATTR_STANDINGS_BY_DIVISION_ARRAY, me.getConference()));
+
+		}
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	/** The higher one goes first! Not sure if it delegates */
+	@RequestMapping(value = { "/about.htn", "aboutInner.htn" })
+	public String about(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+		cRet(CONST_ABOUT_US_DATA).ifPresent(me -> request.setAttribute(CONST_ABOUT_US_DATA, me.getObjectValue()));
+		cRet(CONST_BOARD_OF_DIRECTORS).ifPresent(me -> request.setAttribute(CONST_BOARD_OF_DIRECTORS, me.getObjectValue()));
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = "/divisionBreakDown.htn")
+	public String divisionBreakDown(@ModelAttribute(CONST_AUDIENCE_SESSION) final AudienceSession aud, HttpServletRequest request,
+			HttpServletResponse response) throws Exception {
+
+		String s = sbStr(aud.getXmlPath(), CONST_DIV_TEAM_SUMMARY_STATS, XML);
+
+		Optional<DivisionTeamSummaryStatsHierarchies> theLeagueTeamHierarchies = fRet(s, DivisionTeamSummaryStatsHierarchies.class);
+
+		if (theLeagueTeamHierarchies.isPresent()) {
+
+			smallsyssolutions.com.xml.baseball.divisionTeamSummaryStats.Division divEntry = 
+				theLeagueTeamHierarchies.get().getDivisionById(aud.getIdInt());
+
+			request.setAttribute(CONST_ATTR_DIV_SUMMARY_DATA, divEntry);
+		}
+
+		s = sbStr(aud.getXmlPath(), CONST_STANDINGS_, aud.getLeague(), XML);
+
+		Optional<StandingsHierarchies> standingsHierarchies = ofNullable(_xmlFileRetrieverService.get(s, StandingsHierarchies.class));
+
+		standingsHierarchies.ifPresent( me -> {
+			Division d = standingsHierarchies.get().getDivisionById(aud.getIdInt());
+			request.setAttribute(CONST_ATTR_DIVISION_STANDINGS_DATA, d);
+		});
+		
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = "/intro.htn")
+	public String intro(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+		cRet(CONST_ABOUT_US_DATA).ifPresent(me ->  request.setAttribute(CONST_ABOUT_US_DATA, me.getObjectValue()));
+		cRet(LEAGUE_NAMES_MAP.getName()).ifPresent(me -> request.setAttribute(LEAGUES_KEY, me.getObjectValue()));
+		cRet(CONST_BOARD_OF_DIRECTORS).ifPresent(me -> request.setAttribute(CONST_BOARD_OF_DIRECTORS, me.getObjectValue()));
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	/** The higher one goes first! Not sure if it delegates */
+	@RequestMapping(value = "/index.htn")
+	public String index(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession audienceSession, HttpServletRequest request, HttpServletResponse response) {
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	/** The higher one goes first! Not sure if it delegates */
+	@RequestMapping(value = "/index2.htn")
+	public String index2(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession audienceSession, HttpServletRequest request, HttpServletResponse response) {
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/archives.htn", "archivesInner.htn" })
+	public String archives(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession audienceSession, HttpServletRequest request, HttpServletResponse response) {
+
+		Map<Object, Object> archiveYearsMap;
+
+		Optional<Element> eleOpt = cRet(CONST_ARCHIVE_LINKS_MAP);
+
+		archiveYearsMap = (eleOpt.isPresent() ? as(eleOpt.get().getObjectValue()) : new HashMap<>());
+		
+		request.setAttribute(CONST_ARCHIVE_LINKS_MAP, archiveYearsMap);
+
+		return lookupAndReturn(request, response);
+		
+	}
+
+	@RequestMapping(value = { "/pastChamps.htn", "pastChampsInner.htn" })
+	public String pastChamps(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, Model model, HttpServletRequest request,
+			HttpServletResponse response) throws Exception {
+		
+		String key = REMINDER_PAST_LEADERS.getAttributeName();
+
+		/* Past Champs Listing */ 
+		String str = sbStr(aud.getLeague(), CONST_CHAMPS);
+		cRet(str).ifPresent(me -> request.setAttribute(CONST_ATTR_CHAMP_LIST, me.getObjectValue()));
+		
+		/* Past Leaders Listing */ 
+		cRet(key).ifPresent(me -> request.setAttribute(key, safeList(as(me.getObjectValue()))));
+		
+		
+		return lookupAndReturn(request, response);
+	}
+
+	@RequestMapping(value = { "/picThumbs.htn" })
+	public String picThumbs(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession audienceSession, HttpServletRequest request, HttpServletResponse response) {
+
+		Long lookupID = audienceSession.getId();
+
+		Map<Long, DirectoryListingData> directoryMap = null;
+
+		Optional<Element> picDirectoryMapElement = cRet(CONST_PIC_DIRECTORY_MAP);
+
+		if (picDirectoryMapElement.isPresent()) {
+			directoryMap = as(picDirectoryMapElement.get().getObjectValue());
+			DirectoryListingData theDirectoryListingData = directoryMap.get(lookupID);
+			request.setAttribute(CONST_ATTR_DIRECTORY_LISTING_DATA, theDirectoryListingData);
+		}
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = { "/picGallery.htn", "picGalleryInner.htn" })
+	public String picGallery(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+		cRet(CONST_ATTR_PIC_DIRECTORIES).ifPresent(me -> request.setAttribute(CONST_ATTR_PIC_DIRECTORIES, me.getObjectValue()));
+
+		return lookupAndReturn(request, response);
+	}
+
+	@RequestMapping(value = { "/documents.htn", "documentsInner.htn" })
+	public String documents(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, Model model, HttpServletRequest request,
+			HttpServletResponse response) {
+
+		cRet(CONST_CACHE_LEAGUE_FORMS).ifPresent(me -> request.setAttribute(CONST_ATTR_LEAGUE_FORMS_REMINDER_DATA_LIST, me.getObjectValue()));
+
+		return lookupAndReturn(request, response);
+	}
+
+	@RequestMapping(value = "/404.htn")
+	public String err404(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, Model model, HttpServletRequest request, HttpServletResponse response) {
+		return lookupAndReturn(request, response);
+	}
+
+	@RequestMapping(value = "/500.htn")
+	public String err500(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, Model model, HttpServletRequest request, HttpServletResponse response) {
+		return lookupAndReturn(request, response);
+	}
+
+	@RequestMapping(value = "/validateCapcha.htn")
+	public void validateCapcha(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, Model model, HttpServletRequest request,
+			HttpServletResponse response) throws IOException {
+
+		boolean valid = isValidCapcha(request);
+
+		response.getWriter().write(Boolean.toString(valid));
+
+		return;
+
+	}
+
+	@RequestMapping(value = "/sponsorsInner.htn", method = RequestMethod.GET)
+	public String sponsors(@ModelAttribute(CONST_AUDIENCE_SESSION) AudienceSession aud, Model model, HttpServletRequest request, HttpServletResponse response) {
+
+		Optional<Element> sponsorDataElement = cRet(CONST_SPONSOR_LIST);
+		Optional<Element> sponsorPicsMapElement = cRet(CONST_ATTR_SPONSOR_PICS_MAP);
+		Optional<Element> sponsorImageSizesMapElement = cRet(CONST_ATTR_SPONSOR_IMAGE_SIZES_MAP);
+
+		sponsorDataElement.ifPresent(me -> request.setAttribute(CONST_ATTR_SPONSOR_DATA, me.getObjectValue()));
+		sponsorPicsMapElement.ifPresent(me -> request.setAttribute(CONST_ATTR_SPONSOR_PICS_MAP, me.getObjectValue()));
+		sponsorImageSizesMapElement.ifPresent(me -> request.setAttribute(CONST_ATTR_SPONSOR_IMAGE_SIZES_MAP, me.getObjectValue()));
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	
+
+	@RequestMapping(value = "/linksInner.htn", method = RequestMethod.GET)
+	public String links(HttpServletRequest request, HttpServletResponse response) {
+
+		Optional<Element> ele = cRet(CONST_LINKS_LIST_STRING_ARRAY);
+		ele.ifPresent(me -> request.setAttribute(CONST_LINKS_LIST_STRING_ARRAY, me.getObjectValue()));
+
+		return lookupAndReturn(request, response);
+
+	}
+
+	@RequestMapping(value = "/playerApp.htn", method = RequestMethod.GET)
+	public ModelAndView playerApp(HttpServletRequest request, HttpServletResponse response) throws IOException {
+
+		Map<String, Object> model = new HashMap<>();
+
+		Long initialUid = UtilGeneric.getUniqueID();
+
+		PlayerAppForm form = new PlayerAppForm(initialUid);
+
+		model.put(CONST_COMMAND, form);
+		String view = lookupAndReturn(request, response);
+
+		return new ModelAndView(view, model);
+
+	}
+
+	@RequestMapping(value = "/playerAppSubmit.htn")
+	public void playerAppSubmit(@ModelAttribute(CONST_COMMAND) PlayerAppForm theForm, @RequestParam(name = "nm", required = false) String nm, BindingResult result,
+			Model model, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+		request.getSession().setAttribute(CONST_ATTR_SUBMITTED_NAME, nm);
+
+		if ( !isValidCapcha(request)) {
+			result.addError(new ObjectError(CONST_CAPCHA_TEXT, CONST_LOCALE_MSG_INVALID_CAPCHA));
+			request.setAttribute(CONST_ATTR_CAP_MSG, CONST_LOCALE_MSG_INVALID_CAPCHA); // TODO Translate
+		}
+
+		if (result.hasErrors()) {
+			model.addAttribute(CONST_COMMAND, theForm);
+			model.addAttribute(CONST_ERRORS, result);
+
+			jsonResponse(request, response, result, model, request.getLocale());
+
+		} else {
+			
+			_logEmail.info(theForm);
+			
+			if (!_createContactService.queueUp(theForm)) { 
+				_logErrors.error("could not queue up: " + theForm);
+			}
+			
+		}
+
+		List<MessageStructure> successMessages = new ArrayList<>();
+
+		MessageStructure ms = new MessageStructure(CONST_LOCALE_SUCCESSFUL_SUBMISSION_THANK_YOU, null);
+		successMessages.add(ms);
+
+		jsonResponse(request, response, result, model, request.getLocale(), successMessages);
+
+		return;
+
+	}
+
+	@RequestMapping(value = "/*")
+	public String lookupAndReturn(HttpServletRequest request, HttpServletResponse response) {
+
+		final String tilesName;
+		final String key = request.getServletPath();
+
+		if (_log.isDebugEnabled()) {
+			_log.debug("Return: " + _mappingProperties.getProperty(request.getServletPath()));
+		}
+
+		StringBuilder sb = sb(20).append(_map.get(key));
+
+		tilesName = (notNull(sb.toString()) ? sb.toString() : CONST_APP_404);
+
+		if (_log.isDebugEnabled()) {
+			_log.debug("Returning tile: " + tilesName);
+		}
+
+		return tilesName;
+
+	}
+
+	private boolean isValidCapcha(HttpServletRequest request) {
+
+		boolean isValidCaptchaKey = false;
+
+		String captchaKey = (String) request.getSession().getAttribute(KAPTCHA_SESSION_KEY);
+		String enteredKey = request.getParameter(CONST_CAPCHA_TEXT);
+
+		boolean hasKey = notNull(captchaKey) && notNull(enteredKey);
+
+		isValidCaptchaKey = (hasKey ? (enteredKey.equals(captchaKey) ? true : false) : false);
+
+		return isValidCaptchaKey;
+
+	}
+
+	public final void jsonResponse(HttpServletRequest request, HttpServletResponse response, BindingResult theBindingResult, Model model, Locale loc) {
+		jsonResponse(request, response, theBindingResult, model, loc, null);
+	}
+
+	public final void jsonResponse(HttpServletRequest request, HttpServletResponse response, BindingResult theBindingResult, Model model, Locale loc,
+			List<MessageStructure> successMessages) {
+
+		ReturnStructure rs = new ReturnStructure();
+
+		if (theBindingResult.hasErrors()) {
+
+			for (Object o : theBindingResult.getAllErrors()) {
+	
+				ErrorStructure error1 = new ErrorStructure();
+				ObjectError err = (ObjectError) o;
+				error1.setFieldName(err.getObjectName());
+				error1.setErrorMessage("Error: " + err);
+				rs.getFieldErrors().add(error1);
+			}
+
+			rs.setNumberOfErrors(rs.getFieldErrors().size());
+
+		} else {
+			rs.setWorked(true); /* No errors, cool */
+		}
+
+		if (null != successMessages) {
+			for (MessageStructure ms : successMessages) {
+				rs.getDefaultMessages().add(ms.getMessageCode());
+			}
+		}
+
+		Gson gson = new GsonBuilder().setFieldNamingStrategy(new RemoveBeginningUnderlineFieldNamingStrategy()).create();
+		String json = gson.toJson(rs);
+
+		if (_log.isDebugEnabled()) {
+			_log.debug(json);
+		}
+
+		try {
+			response.setContentType(MimeTypes.JSON.getMimeConstant());
+			response.getWriter().write(json);
+			response.getWriter().close();
+
+		} catch (IOException ioe) {
+			// NOOP
+		}
+
+		return;
+
+	}
+
+	@PostConstruct
+	private void init() {
+		_map = super.doInit(_mappingProperties);
+	}
+
+
+
+	/**
+	 * Currently, location information is being stored directly in session context; I may need to change this.
+	 * 
+	 * @param request
+	 * @param response
+	 * @return
+	 */
+	@RequestMapping(value = "/locationsSelectInner.htn", method = RequestMethod.GET)
+	public String locationsSelct(HttpServletRequest request, HttpServletResponse response) {
+
+		return lookupAndReturn(request, response);
+	}
+
+	@SuppressWarnings("unchecked")
+	public final <T extends Object> T getElementData(Ehcache theCache, String key) {
+
+		if (StaticUtils.isNull(theCache)) {
+			throw new IllegalArgumentException("cache is null in call to getElementDAta!");
+		}
+
+		Element ele = theCache.get(key);
+
+		System.out.println(ele.getObjectValue());
+		System.out.println(ele.getObjectValue().getClass());
+
+		return ((T) ele.getObjectValue());
+
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<ScheduleData> getScheduleDataByMonth(HttpServletRequest request, HttpServletResponse response, AudienceSession aud, String keyLookupString) {
+
+		List<ScheduleData> scheduleList = null; 
+		
+		Optional<Element> ele = cRet(CONST_OBJ_LEAGUE_YYYYMM_SCHEDULE_OUTPUT_MAP);
+
+		if (ele.isPresent()) { 
+			Map<String, List<ScheduleData>> allScheduleDataMap = (Map<String, List<ScheduleData>>) ele.get().getObjectValue();
+			scheduleList = allScheduleDataMap.get(keyLookupString.toString());
+	
+			int dv = isNotEmpty(request.getParameter(CONST_PARAM_dv)) 
+					? Integer.valueOf(request.getParameter(CONST_PARAM_dv))
+					: -1; 
+					
+			if (dv > 0) {
+				scheduleList = FluentIterable
+					.from(scheduleList)
+					.filter(ScheduleDataFilterablePredicate.filterByEitherTeamHasDiv(dv))
+					.toList();
+			}
+		}
+		
+		return safeList(scheduleList);
+
+	}
+
+}
