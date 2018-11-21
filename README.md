@@ -1,10 +1,22 @@
 # sf_example
 
 
-The attached files are an example subset of the chicagocentralmsbl.com website I maintain as a former member of board of directors - as well as a former player (if you review the site long enough, my picture will show up!).  I took maintenance of the site in 2004, and maintain the site upgrades, etc. in the offseason.  I often use the site to bounce ideas/concepts into the application for experimentation.
+The attached files are an example subset of the chicagocentralmsbl.com website (development site @ http://testx.chicagocentralmsbl.com) I maintain as a former member of board of directors - as well as a former player (if you review the site long enough, my picture will show up!).  I took maintenance of the site in 2004, and maintain the site upgrades, etc. in the offseason.  I often use the site to bounce ideas/concepts into the application in the early stages.
 
 
-The general architecture of the site: 
+In general, attached are: 
+
+*** The Spring (4) controller for normal http requests;  I use "DSL-like" methods/calling/shortcuts that would normally follow a catalog of global or domain-centric concepts; in the instance provided, it does not go through peer-review/acceptance  - List<String> list = safeList(as(getList(foo())) insn't fluent - but the wrappers - designed to be safe - are a time saver and eventually - I believe - make the code much more easy to follow in a simple flow.
+
+*** A simple service / interface / impl for retrieving data.
+
+*** A mocked unit test against one of the services.
+
+*** The ant build
+
+
+
+The general architecture:
 
 *** PostgreSQL is the backend database - it houses only the current season's statistics + each season's summary statistics for each  player. During any web visitor's interaction, the database is not used (other than push/contact requests initiated by the visitor - "add my infomation for the draft") - to maintain maximum performance; for most interactions, the CPU cycles of pointing cahce data into a user's request.  Any cache misses are due to the archives - which are not preloading.  After a season is completed, the individual team/player/season stats are removed (in deference to the season's ending XML representation).
 
@@ -17,11 +29,13 @@ The general architecture of the site:
 
 2018 off-season updates coming: 
 
-*** 1) Convert all XML flat file data into noSQL (mongodb) to easier maintain the data / retain the data w/ db backups.
+*** 1) Convert all XML flat file data into noSQL (mongodb) to easier access/retain the data.
 
-*** 2) Configure the xml data in mongo to the json equivelent - in order to remove the "java-mapping" equation; most of the pages are JSP-evaluated java structures.  XML provides half the battle, but JSON/other will remove the java mapping from the equation.
+*** 2) Configure the xml data in mongo to the json equivelent - in order to remove the "java-mapping" equation; most of the pages are JSP-evaluated java structures.  JSON/other will remove the java mapping from the equation for flexibility.
 
-*** 3) (pre-req on 1/2 above); Start the process of single/responsive page design; the process has begun with the simple reactJS flows for sponsors - maintain and continue further.
+*** 3) (pre-req on 1/2 above); Start the process of single/responsive page design; the process has begun with the simple reactJS flow for sponsors - maintain and continue further.
+
+
 
 
 Thank you! 
