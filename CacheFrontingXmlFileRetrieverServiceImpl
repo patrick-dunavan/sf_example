@@ -1,0 +1,155 @@
+package chicagocentralmsbl.services;
+
+import static chicagocentralmsbl.common.CommonUtil.as;
+import static smallsyssolutions.com.util.StaticUtils.isNotNull;
+import static smallsyssolutions.com.util.StaticUtils.isNull;
+import static smallsyssolutions.com.util.UtilGeneric.getPrintExceptionString;
+
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.Reader;
+import java.io.StringReader;
+
+import org.apache.log4j.Logger;
+import org.exolab.castor.xml.Unmarshaller;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
+import org.xml.sax.InputSource;
+
+import net.sf.ehcache.Ehcache;
+import net.sf.ehcache.Element;
+
+/**
+ * This class is a simple file retriever that first checks the cache for the existence of the XML data to be retrieved - and when not found in the cache,
+ * looks up the xml file and converts it into a Java Class using Castor.
+ * 
+ * 2018-11: UPdates for java 1.8 and StringBufferInputStream deprecation update
+ * 
+ * Due to the simplicity of the functionality, as well as the strong tie-in between the file retrieval and the cache, this class
+ * does not proxy or decorate to the underlying file reader implementation; in this specific case - they are tied together 
+ * and I have no justification to be split apart as a decorator wrapping the underlying file reading implementation; 
+ * 
+ * This will not hold for long though - as the indivdual raw file pulls of the data will be replaced by a noSQL database store.
+ * 
+ * 
+ * 
+ * TODO: Convert to logback 
+ * @author pdd
+ *
+ */
+
+@Component(value="xmlFileRetrieverService")
+public class CacheFrontingXmlFileRetrieverServiceImpl implements XmlFileRetrieverService {
+
+
+	private final static Logger _log = Logger.getLogger(CacheFrontingXmlFileRetrieverServiceImpl.class);
+	private final static Logger _errorLog = Logger.getLogger("errors");
+
+	@Autowired
+	@Qualifier("cacheFiles")
+	private Ehcache _cacheFiles;
+
+	@Autowired
+	@Qualifier("fileReader")
+	private FileReader _fileReader; 
+
+	private enum CacheFileStatus {
+			elementPresent, 
+			filePresent,
+			none
+	}; 
+	
+	
+	@SuppressWarnings("unchecked")
+	@Override
+	public <T> T get(String cacheKey, Class<?> optionalMarshallingClass) {
+
+		if (isNull(cacheKey)) { 
+			throw new IllegalArgumentException("Cache key cannot be null.");
+		}
+		
+		T returnObject = null;
+
+		CacheFileStatus status = null; 
+		
+		try {
+
+			status = ( _cacheFiles.isKeyInCache(cacheKey) 
+				? CacheFileStatus.elementPresent 
+				: ( _fileReader.exists(cacheKey) 
+						? CacheFileStatus.filePresent 
+						: CacheFileStatus.none));
+			
+			if (_log.isDebugEnabled()) { 
+				_log.debug("Cache files key exists? " + cacheKey + " / " + status);
+			}
+			
+			switch (status) {
+				case elementPresent: {
+					Element ele = _cacheFiles.get(cacheKey);
+					returnObject = (T) ele.getObjectValue();
+					break;
+				}
+				case filePresent: { 
+					returnObject = (T) readAndUnmarshall(cacheKey, optionalMarshallingClass);
+					break;
+				}
+				default: { 
+					throw new FileNotFoundException(cacheKey);
+				}
+			}
+			
+		} catch (Exception e) {
+			_errorLog.error(e.getMessage());
+			getPrintExceptionString(e);
+		}
+
+		return returnObject;  //This object can be null; let the caller handle this case. 
+		
+
+	}
+
+	private final <T> T readAndUnmarshall(String key, Class<T> optionalMarshallingClass) throws Exception {
+
+		T returnObject = null;
+
+		String fileResultsString = _fileReader.readFileString(key);
+
+		if (isNotNull(optionalMarshallingClass)) {
+			
+			T theObject = getUnMarshallData(fileResultsString, optionalMarshallingClass);
+			
+			Element ele = new Element(key, theObject);
+			_cacheFiles.put(ele);
+			
+			returnObject = theObject;
+			
+		} else {
+			
+			Element ele = new Element(key, fileResultsString);
+			_cacheFiles.put(ele);
+			returnObject = as(fileResultsString);
+		}
+
+		return returnObject;
+
+	}
+
+	private final <T extends Object> T getUnMarshallData(String data, Class<T> clz) throws Exception {
+
+		try (
+				Reader r = new BufferedReader(new StringReader(data));
+		) {
+			
+			T returnData = as(Unmarshaller.unmarshal(clz, new InputSource(r)));
+			return returnData;
+
+		} catch (Exception e) {
+			throw e;
+		}
+
+	}
+
+	
+}
