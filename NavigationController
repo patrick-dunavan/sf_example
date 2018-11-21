@@ -678,7 +678,7 @@ public class NavigationController extends AbstractNavigationController implement
 
 
 	/**
-	 * Currently, location information is being stored directly in session context; I may need to change this.
+	 * Currently, location information is being stored directly in app context;
 	 * 
 	 * @param request
 	 * @param response
@@ -688,6 +688,7 @@ public class NavigationController extends AbstractNavigationController implement
 	public String locationsSelct(HttpServletRequest request, HttpServletResponse response) {
 
 		return lookupAndReturn(request, response);
+		
 	}
 
 	@SuppressWarnings("unchecked")
