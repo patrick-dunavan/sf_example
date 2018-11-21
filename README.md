@@ -6,13 +6,15 @@ The attached files are an example subset of the chicagocentralmsbl.com website (
 
 In general, attached are: 
 
-*** The Spring (4) controller for normal http requests;  I use "DSL-like" methods/calling/shortcuts that would normally follow a catalog of global or domain-centric concepts; in the instance provided, it does not go through peer-review/acceptance  - List<String> list = safeList(as(getList(foo())) insn't fluent - but the wrappers - designed to be safe - are a time saver and eventually - I believe - make the code much more easy to follow in a simple flow.
+*** The Spring (4) controller for normal http requests;  I use "DSL-like" methods/calling/shortcuts that would normally follow a catalog of global or domain-centric concepts; in the instance provided, it does not go through peer-review/acceptance  - List<String> list = safeList(as(getList(foo())) insn't fluent - but the wrappers - designed to be safe - are a time saver and eventually - I believe - make the code much more easy to follow as long as the language is expressive.
 
-*** A simple service / interface / impl for retrieving data.
+*** A service / interface / impl for retrieving data.
 
 *** A mocked unit test against one of the services.
 
-*** The ant build (This build relies on the underlying Eclipse-generated .classes) does not include integration into the unit test suite, code coverage, etc.  This is by design for a minimal build/deploy; Unit tests/code coverage for this project is performed by hand utilizing embedded Junit runner with eclEmma for code coverage.
+*** The ant build (This build relies on the underlying Eclipse-generated .classes) does not include integration into the unit test suite, code coverage, etc.  This is by design for a minimal build/deploy; Unit tests/code coverage for this project is performed by hand utilizing embedded Junit runner with eclEmma for code coverage.  less complilation is included as well as triggered during any change to the .less filein the IDE.
+
+I am stating to note the process above is much different from a triggered compile/build/test/coverage/deploy from Jenkins, etc.  I use in a more formal environment.  
 
 
 The general architecture:
@@ -32,7 +34,7 @@ Off-season updates coming as time allows:
 
 *** 1) Convert all XML flat file data into noSQL (mongodb) to easier access/retain the data.
 
-*** 2) Configure the xml data in mongo to the json equivelent - in order to remove the "java-mapping" equation; most of the pages are JSP-evaluated java structures.
+*** 2) Configure the xml data in mongo to the json equivelent - in order to remove the "java-mapping" equation; most of the pages currently are JSP-evaluated java structures.
 
 *** 3) (pre-req on 1/2 above); Start the process of single/responsive page design; the process has begun with the simple reactJS flow for sponsors - maintain and continue further.
 
