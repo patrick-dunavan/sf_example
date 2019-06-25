@@ -1,7 +1,7 @@
 # sf_example
 
 
-The attached files are an example subset of the chicagocentralmsbl.com website (development site @ http://testx.chicagocentralmsbl.com) I maintain as a former member of board of directors - as well as a former player (if you review the site long enough, my picture will show up!).  I took maintenance of the site in 2004, and maintain the site upgrades, etc. in the offseason.  I often use the site to bounce ideas/concepts into the application in the early stages.
+The attached files are an example subset of the chicagocentralmsbl.com website I maintain as a former member of board of directors - as well as a former player (if you review the site long enough, my picture will show up!).  I took maintenance of the site in 2004, and maintain the site upgrades, etc. in the offseason.  I often use the site to bounce ideas/concepts into the application in the early stages.
 
 
 In general, attached are: 
@@ -14,7 +14,7 @@ In general, attached are:
 
 *** The ant build (This build relies on the underlying Eclipse-generated .classes) does not include integration into the unit test suite, code coverage, etc.  This is by design for a minimal build/deploy; Unit tests/code coverage for this project is performed by hand utilizing embedded Junit runner with eclEmma for code coverage.  less complilation is included as well as triggered during any change to the .less filein the IDE.
 
-I am stating to note the process above is much different from a triggered compile/build/test/coverage/deploy from Jenkins, etc.  I use in a more formal environment.  
+I am stating to note the process above is much different from a triggered CI/CD compile/build/test/coverage/deploy from Jenkins, etc.  I use in a more formal environment.  
 
 
 The general architecture:
@@ -32,7 +32,7 @@ The general architecture:
 
 Off-season updates coming as time allows: 
 
-*** 1) Convert all XML flat file data into noSQL (mongodb) to easier access/retain the data.
+*** 1) Convert all XML flat file data into noSQL (mongodb) to easier access/retain the data.  (Completed, March 2019 but will likely move to Postgres/JSONB fall 2019).
 
 *** 2) Configure the xml data in mongo to the json equivelent - in order to remove the "java-mapping" equation; most of the pages currently are JSP-evaluated java structures.
 
